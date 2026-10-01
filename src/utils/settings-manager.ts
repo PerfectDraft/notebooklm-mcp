@@ -36,6 +36,7 @@ const PROFILES: Record<ProfileName, string[]> = {
     "list_notebooks",
     "select_notebook",
     "get_notebook", // Added as it is read-only and useful
+    "list_sources",
   ],
   standard: [
     "ask_question",
@@ -43,6 +44,8 @@ const PROFILES: Record<ProfileName, string[]> = {
     "list_notebooks",
     "select_notebook",
     "get_notebook",
+    "list_sources",
+    "add_source",
     "setup_auth",
     "list_sessions",
     "add_notebook",

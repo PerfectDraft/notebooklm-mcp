@@ -69,20 +69,21 @@ Ask a question against a notebook. Reuses an existing browser session when `sess
 
 ---
 
-## add_source — new in v2
+## add_source — updated in v2.1
 
-Add a source to a notebook. v2 supports `type=url` (web crawl) and `type=text` (paste). File / YouTube / Drive uploads are not supported.
+Add a source to a notebook. Supports `type=url` (web crawl), `type=text` (raw paste), `type=file` (local PDF/DOCX/TXT/MD upload), and `type=youtube` (video transcript).
 
 ### Parameters
 
 | Name | Type | Required | Notes |
 |---|---|---|---|
-| `type` | `url` \| `text` | yes | |
-| `content` | string | yes | URL when `type=url`, raw text when `type=text`. |
+| `type` | `url` \| `text` \| `file` \| `youtube` | yes | Type of source to ingest. YouTube URLs passed as `url` are auto-routed. |
+| `content` | string | yes | URL when `type=url`/`youtube`, raw text when `type=text`, local file path when `type=file`. |
 | `title` | string | no | Optional display title. NotebookLM picks a default. |
 | `session_id` | string | no | Reuse an existing browser session. |
 | `notebook_id` | string | no | Library notebook ID. |
 | `notebook_url` | string | no | Ad-hoc URL. Overrides `notebook_id`. |
+| `show_browser` | boolean | no | Show browser for debugging. |
 
 ### Example
 
@@ -90,23 +91,40 @@ Add a source to a notebook. v2 supports `type=url` (web crawl) and `type=text` (
 {
   "name": "add_source",
   "arguments": {
-    "type": "url",
-    "content": "https://docs.n8n.io/code/builtin/json-jmespath/",
-    "title": "n8n JMESPath builtin"
+    "type": "file",
+    "content": "D:/docs/research_paper.pdf",
+    "title": "Research Paper 2026"
   }
 }
 ```
+
+---
+
+## list_sources — new in v2.1
+
+List all sources currently ingested in a notebook with their index, display title, and active status.
+
+### Parameters
+
+| Name | Type | Required | Notes |
+|---|---|---|---|
+| `session_id` | string | no | Reuse an existing browser session. |
+| `notebook_id` | string | no | Library notebook ID. |
+| `notebook_url` | string | no | Ad-hoc URL. Overrides `notebook_id`. |
+| `show_browser` | boolean | no | Show browser for debugging. |
 
 ### Return shape
 
 ```jsonc
 {
-  "status": "success",
-  "type": "url",
-  "title": "n8n JMESPath builtin",
-  "source_count_before": 12,
-  "source_count_after": 13,
-  "added": true
+  "sources": [
+    {
+      "index": 1,
+      "title": "Research Paper 2026.pdf",
+      "selected": true
+    }
+  ],
+  "count": 1
 }
 ```
 

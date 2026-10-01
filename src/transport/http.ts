@@ -15,9 +15,9 @@
 
 import {
   createServer,
-  IncomingMessage,
+  type IncomingMessage,
   type Server as HttpServer,
-  ServerResponse,
+  type ServerResponse,
 } from "node:http";
 import { randomUUID } from "node:crypto";
 import type { Server as McpServer } from "@modelcontextprotocol/sdk/server/index.js";

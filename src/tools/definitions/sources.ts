@@ -35,42 +35,43 @@ const sharedNotebookTargeting = {
 export const addSourceTool: Tool = {
   name: "add_source",
   description:
-    "Ingest a source into a NotebookLM notebook. Supports two source types " +
-    "in v2.0:\n" +
-    "  • `url` — NotebookLM crawls and indexes a website\n" +
-    "  • `text` — paste raw text (treated as a copied document)\n\n" +
-    "File / YouTube / Google-Drive uploads are not yet implemented.\n\n" +
+    "Ingest a source into a NotebookLM notebook. Supports four source types:\n" +
+    "  • `url` — NotebookLM crawls and indexes a website (YouTube links are auto-routed)\n" +
+    "  • `text` — paste raw text (treated as a copied document)\n" +
+    "  • `file` — upload a local file from disk (PDF, DOCX, TXT, MD, EPUB, etc.)\n" +
+    "  • `youtube` — ingest transcript and content from a YouTube video\n\n" +
     "Returns `sourceCountBefore`/`sourceCountAfter` so the caller can verify " +
     "the new source landed. Call once per source — multiple sources require " +
     "multiple calls. NotebookLM finishes indexing within 5–30 seconds; " +
     "subsequent `ask_question` calls then have the new source in context. " +
     "Free notebooks cap at 50 sources.\n\n" +
     "Known quirk: pasted-text uploads occasionally redirect to a freshly " +
-    "created \"Untitled notebook\" on Google's side. The tool detects this " +
+    'created "Untitled notebook" on Google\'s side. The tool detects this ' +
     "and returns a clear error so you can re-try against the correct URL.",
   inputSchema: {
     type: "object",
     properties: {
       type: {
         type: "string",
-        enum: ["url", "text"],
+        enum: ["url", "text", "file", "youtube"],
         description:
-          "`url` crawls the supplied website; `text` ingests `content` " +
-          "verbatim as a copied document.",
+          "`url` crawls the supplied website; `text` ingests `content` verbatim; " +
+          "`file` uploads a local file from disk; `youtube` ingests a YouTube video URL.",
       },
       content: {
         type: "string",
         description:
-          "When `type=url`: a fully-qualified URL (https://…). " +
-          "When `type=text`: the raw text body (any length up to NotebookLM's per-source word limit, ~500 k for free tier).",
+          "When `type=url`: website URL (https://…). " +
+          "When `type=text`: raw text body. " +
+          "When `type=file`: local file path on disk (e.g. D:/docs/paper.pdf). " +
+          "When `type=youtube`: YouTube video URL (https://www.youtube.com/... or https://youtu.be/...).",
       },
       title: {
         type: "string",
         description:
           "Display title shown in the source list. Optional — NotebookLM " +
-          "picks a sensible default (page title for URLs, first line for text). " +
-          "For text sources, supplying a title is recommended for later " +
-          "identification.",
+          "picks a sensible default (page title for URLs, file name for files, first line for text). " +
+          "Supplying a title is recommended for later identification.",
       },
       show_browser: {
         type: "boolean",
@@ -89,15 +90,40 @@ export const addSourceTool: Tool = {
   },
 };
 
+export const listSourcesTool: Tool = {
+  name: "list_sources",
+  description:
+    "List all sources currently ingested in a NotebookLM notebook.\n\n" +
+    "Returns an array of sources with their index, display title, and whether they are active/selected. " +
+    "Useful for checking existing documents before asking questions or adding new sources.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      show_browser: {
+        type: "boolean",
+        description: "Show the browser window for debugging. Default: false.",
+      },
+      ...sharedNotebookTargeting,
+    },
+  },
+  annotations: {
+    title: "List notebook sources",
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
+};
+
 export const generateAudioTool: Tool = {
   name: "generate_audio",
   description:
     "Trigger podcast-style Audio Overview generation for a notebook.\n\n" +
     "**Async by default** — returns immediately with one of:\n" +
-    "  • `status: \"started\"` — generation just kicked off\n" +
-    "  • `status: \"in_progress\"` — a generation was already running; " +
+    '  • `status: "started"` — generation just kicked off\n' +
+    '  • `status: "in_progress"` — a generation was already running; ' +
     "this call attached to it\n" +
-    "  • `status: \"ready\"` (with `alreadyExisted: true`) — an Audio " +
+    '  • `status: "ready"` (with `alreadyExisted: true`) — an Audio ' +
     "Overview already existed; nothing was triggered\n\n" +
     "Generation typically takes 2–10 minutes. **Workflow:**\n" +
     "  1. `generate_audio` → returns immediately\n" +
@@ -113,9 +139,9 @@ export const generateAudioTool: Tool = {
       custom_prompt: {
         type: "string",
         description:
-          "Optional focus prompt for the Audio Overview, e.g. \"Focus on the " +
-          "API authentication flow and skip pricing\". Passed into the " +
-          "NotebookLM \"Customize\" sub-dialog before generation starts.",
+          'Optional focus prompt for the Audio Overview, e.g. "Focus on the ' +
+          'API authentication flow and skip pricing". Passed into the ' +
+          'NotebookLM "Customize" sub-dialog before generation starts.',
       },
       wait_for_completion: {
         type: "boolean",
@@ -178,7 +204,7 @@ export const downloadAudioTool: Tool = {
   name: "download_audio",
   description:
     "Save the completed Audio Overview to disk as a `.m4a` file. **Pre-" +
-    "condition:** `get_audio_status` must report `status: \"ready\"`. " +
+    'condition:** `get_audio_status` must report `status: "ready"`. ' +
     "Calling this before generation completes returns an error message " +
     "explaining what to do.\n\n" +
     "The file lands in `destination_dir` with NotebookLM's suggested " +
@@ -214,6 +240,7 @@ export const downloadAudioTool: Tool = {
 
 export const sourceTools: Tool[] = [
   addSourceTool,
+  listSourcesTool,
   generateAudioTool,
   getAudioStatusTool,
   downloadAudioTool,

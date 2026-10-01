@@ -28,15 +28,23 @@
  */
 
 import type { Page } from "patchright";
+import fs from "fs";
+import path from "path";
 import { Selectors, joinAlt } from "./selectors.js";
 import { safeSleep, isRecoverable } from "../browser/watchdog.js";
 import { log } from "../utils/logger.js";
 
-export type SourceType = "url" | "text";
+export type SourceType = "url" | "text" | "file" | "youtube";
+
+export interface NotebookSource {
+  index: number;
+  title: string;
+  selected?: boolean;
+}
 
 export interface AddSourceInput {
   type: SourceType;
-  /** URL when `type === "url"`, raw text when `type === "text"`. */
+  /** URL when `type === "url"`, raw text when `type === "text"`, local path when `type === "file"`, YouTube URL when `type === "youtube"`. */
   content: string;
   /** Optional title shown in the source list. NotebookLM uses a default if omitted. */
   title?: string;
@@ -53,45 +61,139 @@ export interface AddSourceResult {
 export async function addSource(page: Page, input: AddSourceInput): Promise<AddSourceResult> {
   const initialUrl = page.url();
   const expectedUuid = initialUrl.match(/notebook\/([a-f0-9-]+)/)?.[1];
-  log.info(`📄 [add_source] type=${input.type} target_uuid=${expectedUuid ?? "?"}`);
+  let effectiveType = input.type;
+
+  // Auto-detect YouTube URLs
+  if (
+    effectiveType === "url" &&
+    /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)/i.test(input.content)
+  ) {
+    log.info(`  🎥 Auto-detected YouTube URL: routing to type="youtube"`);
+    effectiveType = "youtube";
+  }
+
+  log.info(`📄 [add_source] type=${effectiveType} target_uuid=${expectedUuid ?? "?"}`);
 
   try {
+    if (effectiveType === "file") {
+      const resolvedPath = path.resolve(input.content);
+      if (!fs.existsSync(resolvedPath)) {
+        throw new Error(`File does not exist: ${input.content} (resolved: ${resolvedPath})`);
+      }
+
+      const before = await countSources(page);
+      log.info(`  📊 source count before file upload: ${before}`);
+
+      await openAddSourceOverlay(page);
+
+      // Try setting file on existing file input
+      let fileSet = false;
+      const fileInput = page.locator('input[type="file"]').first();
+      if ((await fileInput.count().catch(() => 0)) > 0) {
+        try {
+          await fileInput.setInputFiles(resolvedPath);
+          fileSet = true;
+          log.info(`  📁 Set file directly to input[type="file"]: ${resolvedPath}`);
+        } catch {
+          fileSet = false;
+        }
+      }
+
+      if (!fileSet) {
+        const overlay = page.locator(Selectors.sources.overlayPane).first();
+        for (const sel of Selectors.sources.sourceTypeFile) {
+          if (sel === 'input[type="file"]') continue;
+          const btn = overlay.locator(sel).first();
+          if (await btn.isVisible({ timeout: 1_000 }).catch(() => false)) {
+            const [fileChooser] = await Promise.all([
+              page.waitForEvent("filechooser", { timeout: 6_000 }).catch(() => null),
+              btn.click().catch(() => undefined),
+            ]);
+            if (fileChooser) {
+              await fileChooser.setFiles(resolvedPath);
+              fileSet = true;
+              log.info(`  📁 Set file via fileChooser: ${resolvedPath}`);
+              break;
+            }
+          }
+        }
+      }
+
+      if (!fileSet) {
+        const lateFileInput = page.locator('input[type="file"]').first();
+        if ((await lateFileInput.count().catch(() => 0)) > 0) {
+          await lateFileInput.setInputFiles(resolvedPath);
+          fileSet = true;
+        }
+      }
+
+      if (!fileSet) {
+        throw new Error("Could not find file input or upload trigger button in Add-source overlay");
+      }
+
+      // Allow dialog / animation to handle the file upload
+      await safeSleep(page, 1000);
+      const insertBtn = page.locator(joinAlt(Selectors.sources.insertConfirm)).first();
+      if (await insertBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
+        const disabled = await insertBtn.isDisabled().catch(() => false);
+        if (!disabled) {
+          await insertBtn.click().catch(() => undefined);
+        }
+      }
+
+      await waitForOverlayToClose(page, 60_000);
+      const after = await waitForSourceCountIncrease(page, before, 120_000);
+      if (after > before) {
+        log.success(`  ✅ file source added (count ${before} → ${after})`);
+        return {
+          success: true,
+          type: "file",
+          sourceCountBefore: before,
+          sourceCountAfter: after,
+        };
+      }
+
+      const errorText = await readDialogError(page);
+      return {
+        success: false,
+        type: "file",
+        sourceCountBefore: before,
+        sourceCountAfter: after,
+        message:
+          errorText ||
+          "File was uploaded, but the source count did not increment within 120 s. " +
+            "NotebookLM may still be processing the document.",
+      };
+    }
+
     // 1. Open the Add-source dialog (or use one that's already open).
     await openAddSourceOverlay(page);
 
-    // 2. Pick the source type if there is a picker. Some overlay variants
-    //    drop straight into an input field; pickSourceType is a no-op then.
-    await pickSourceType(page, input.type);
+    // 2. Pick the source type if there is a picker.
+    await pickSourceType(page, effectiveType);
 
     // 3. Fill the content + optional title.
-    await fillSourceContent(page, input);
+    await fillSourceContent(page, { ...input, type: effectiveType });
 
-    // 4. Snapshot the source count *before* submitting. The Fork captures it
-    //    here (dialog still open, sidebar list not yet updated) so the
-    //    post-close poll can detect a real increment.
+    // 4. Snapshot the source count *before* submitting.
     const before = await countSources(page);
     log.info(`  📊 source count before submit: ${before}`);
 
     // 5. Click the primary "Insert" / "Hinzufügen" button.
     await confirmInsert(page);
 
-    // 6. Wait for the dialog to animate away. NotebookLM doesn't append the
-    //    new sidebar entry until the modal is fully gone.
+    // 6. Wait for the dialog to animate away.
     await waitForOverlayToClose(page);
 
-    // 7. UUID redirect check: pasted-text uploads occasionally land in a new
-    //    "Untitled notebook" instead of the target. Catch that here so the
-    //    caller sees a useful error instead of a phantom success.
+    // 7. UUID redirect check: pasted-text uploads occasionally land in a new notebook.
     if (expectedUuid) {
       const currentUrl = page.url();
       const currentUuid = currentUrl.match(/notebook\/([a-f0-9-]+)/)?.[1];
       if (currentUuid && currentUuid !== expectedUuid) {
-        log.error(
-          `  ❌ Notebook redirect: expected ${expectedUuid}, got ${currentUuid}`
-        );
+        log.error(`  ❌ Notebook redirect: expected ${expectedUuid}, got ${currentUuid}`);
         return {
           success: false,
-          type: input.type,
+          type: effectiveType,
           sourceCountBefore: before,
           sourceCountAfter: before,
           message:
@@ -102,25 +204,24 @@ export async function addSource(page: Page, input: AddSourceInput): Promise<AddS
       }
     }
 
-    // 8. Poll the source count for up to 90 s; URL crawls and large pastes
-    //    can take a while to materialise as a sidebar entry.
+    // 8. Poll the source count for up to 90 s.
     const after = await waitForSourceCountIncrease(page, before, 90_000);
 
     if (after > before) {
       log.success(`  ✅ source added (count ${before} → ${after})`);
       return {
         success: true,
-        type: input.type,
+        type: effectiveType,
         sourceCountBefore: before,
         sourceCountAfter: after,
       };
     }
 
-    // 9. Last-ditch: maybe an error toast surfaced; surface it verbatim.
+    // 9. Last-ditch: read error toast if any.
     const errorText = await readDialogError(page);
     return {
       success: false,
-      type: input.type,
+      type: effectiveType,
       sourceCountBefore: before,
       sourceCountAfter: after,
       message:
@@ -133,7 +234,7 @@ export async function addSource(page: Page, input: AddSourceInput): Promise<AddS
     log.warning(`  ⚠️  add_source failed: ${err}`);
     return {
       success: false,
-      type: input.type,
+      type: effectiveType,
       sourceCountBefore: 0,
       sourceCountAfter: 0,
       message: err instanceof Error ? err.message : String(err),
@@ -193,17 +294,16 @@ async function openAddSourceOverlay(page: Page): Promise<void> {
 
   // Try the sidebar button first — fastest path on a populated notebook.
   try {
-    await page
-      .locator(joinAlt(Selectors.sources.addButton))
-      .first()
-      .click({ timeout: 5_000 });
+    await page.locator(joinAlt(Selectors.sources.addButton)).first().click({ timeout: 5_000 });
     await page
       .locator(Selectors.sources.overlayPane)
       .first()
       .waitFor({ state: "visible", timeout: 8_000 });
     return;
   } catch (err) {
-    log.warning(`  ⚠️  Add-source button click failed (${err}), trying ?addSource=true URL fallback`);
+    log.warning(
+      `  ⚠️  Add-source button click failed (${err}), trying ?addSource=true URL fallback`
+    );
   }
 
   // URL fallback — useful when the sidebar button is hidden or covered.
@@ -231,10 +331,20 @@ async function isOverlayVisible(page: Page): Promise<boolean> {
 }
 
 async function pickSourceType(page: Page, type: SourceType): Promise<void> {
-  const candidates =
-    type === "url" ? Selectors.sources.sourceTypeUrl : Selectors.sources.sourceTypeText;
+  let candidates: readonly string[];
+  if (type === "url") {
+    candidates = Selectors.sources.sourceTypeUrl;
+  } else if (type === "youtube") {
+    candidates = Selectors.sources.sourceTypeYoutube;
+  } else if (type === "file") {
+    candidates = Selectors.sources.sourceTypeFile;
+  } else {
+    candidates = Selectors.sources.sourceTypeText;
+  }
+
   const overlay = page.locator(Selectors.sources.overlayPane).first();
   for (const sel of candidates) {
+    if (sel === 'input[type="file"]') continue;
     const target = overlay.locator(sel).first();
     if (await target.isVisible({ timeout: 1_000 }).catch(() => false)) {
       await target.click();
@@ -374,4 +484,58 @@ async function readDialogError(page: Page): Promise<string | null> {
     }
   }
   return null;
+}
+
+/**
+ * List all sources currently loaded in the active NotebookLM notebook.
+ * Reads the sidebar DOM `.single-source-container` entries.
+ */
+export async function listSources(page: Page): Promise<NotebookSource[]> {
+  try {
+    const containerCount = await countSources(page);
+    log.info(`  📊 Counting sources in notebook: found ${containerCount}`);
+
+    return await page.evaluate(() => {
+      const items = document.querySelectorAll(".single-source-container");
+      const list: Array<{ index: number; title: string; selected: boolean }> = [];
+
+      items.forEach((item, idx) => {
+        const titleEl =
+          item.querySelector(
+            ".source-title, .title, [role='heading'], span.title, .mat-line, .source-item-title, span"
+          ) || item;
+        const checkbox = item.querySelector(
+          "input[type='checkbox'], mat-checkbox, [role='checkbox']"
+        );
+        let selected = true;
+        if (checkbox) {
+          const ariaChecked = checkbox.getAttribute("aria-checked");
+          if (ariaChecked !== null) {
+            selected = ariaChecked === "true";
+          } else if ((checkbox as HTMLInputElement).checked !== undefined) {
+            selected = (checkbox as HTMLInputElement).checked;
+          }
+        }
+
+        let title = (titleEl.textContent || "").trim();
+        // Strip out common UI icon names and extra whitespace
+        title = title
+          .replace(/\b(more_vert|more_horiz|close|delete|edit|check)\b/g, "")
+          .replace(/\s+/g, " ")
+          .trim();
+
+        if (title) {
+          list.push({
+            index: idx + 1,
+            title,
+            selected,
+          });
+        }
+      });
+      return list;
+    });
+  } catch (err) {
+    log.warning(`  ⚠️  Failed to list sources: ${err}`);
+    return [];
+  }
 }

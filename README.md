@@ -1,5 +1,5 @@
-> [!WARNING]
-> **This project is no longer maintained.** As of September 2026 the repository is archived: no updates, bug fixes or support. The npm package will not receive further releases. It may stop working when the upstream services change. Feel free to fork.
+> [!NOTE]
+> **Maintained & Enhanced Fork by PerfectDraft.** This fork extends the archived upstream project with support for local file uploads (PDF, DOCX, TXT, MD), YouTube video ingestion, and the new `list_sources` inspection tool.
 
 # NotebookLM MCP Server
 
@@ -206,8 +206,10 @@ All tools below are registered in v2.0.0 and visible under the `full` profile. S
 
 | Tool | Purpose |
 |---|---|
-| `add_source` | Add a source to a notebook. v2 supports `type=url` (web crawl) and `type=text` (paste). Returns source counts before/after. |
+| `add_source` | Add a source to a notebook. Supports `type=url` (web crawl), `type=text` (raw paste), `type=file` (local PDF/DOCX/TXT/MD upload), and `type=youtube` (video transcript). |
+| `list_sources` | Enumerate all sources currently loaded in a notebook with their index, display title, and active status. |
 | `generate_audio` | Generate an Audio Overview. Optional `custom_prompt`, `timeout_ms` (default 600 000 ms). |
+| `get_audio_status` | Non-blocking probe for the current Audio Overview state (`ready`, `in_progress`, `not_started`). |
 | `download_audio` | Save the most recent Audio Overview to `destination_dir`. Run `generate_audio` first if none exists. |
 
 ### Library

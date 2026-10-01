@@ -26,8 +26,10 @@ import {
 } from "../notebooklm/citations.js";
 import {
   addSource as addSourceToPage,
+  listSources as listSourcesFromPage,
   type AddSourceInput,
   type AddSourceResult,
+  type NotebookSource,
 } from "../notebooklm/sources.js";
 import {
   generateAudioOverview as generateAudioOnPage,
@@ -491,6 +493,16 @@ export class BrowserSession {
       await this.init();
     }
     return await addSourceToPage(this.page!, input);
+  }
+
+  /**
+   * List all sources currently loaded in the active notebook page.
+   */
+  async listSources(): Promise<NotebookSource[]> {
+    if (!this.initialized || !this.page || this.isPageClosedSafe()) {
+      await this.init();
+    }
+    return await listSourcesFromPage(this.page!);
   }
 
   /**

@@ -1,7 +1,7 @@
 {
   "name": "notebooklm-mcp",
-  "version": "2.0.0",
-  "description": "MCP server for Google NotebookLM — chat, source ingestion, audio overviews, citations, stdio + Streamable-HTTP transports.",
+  "version": "2.1.0",
+  "description": "MCP server for Google NotebookLM — chat, source ingestion (URL/text/file/YouTube), audio overviews, citations, stdio + Streamable-HTTP transports.",
   "type": "module",
   "bin": {
     "notebooklm-mcp": "dist/index.js"
@@ -26,15 +26,15 @@
     "ai",
     "claude"
   ],
-  "author": "Gérôme Dexheimer <hello@geromedexheimer.de> (https://github.com/PleasePrompto)",
+  "author": "PerfectDraft (forked from PleasePrompto)",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/PleasePrompto/notebooklm-mcp.git"
+    "url": "git+https://github.com/PerfectDraft/notebooklm-mcp.git"
   },
-  "homepage": "https://github.com/PleasePrompto/notebooklm-mcp#readme",
+  "homepage": "https://github.com/PerfectDraft/notebooklm-mcp#readme",
   "bugs": {
-    "url": "https://github.com/PleasePrompto/notebooklm-mcp/issues"
+    "url": "https://github.com/PerfectDraft/notebooklm-mcp/issues"
   },
   "files": [
     "dist",

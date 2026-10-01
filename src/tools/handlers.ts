@@ -13,7 +13,7 @@ import type {
   NotebookEntry,
   UpdateNotebookInput,
 } from "../library/types.js";
-import type { AddSourceResult } from "../notebooklm/sources.js";
+import type { AddSourceResult, NotebookSource, SourceType } from "../notebooklm/sources.js";
 import type { AudioGenerationResult, DownloadAudioResult } from "../notebooklm/audio.js";
 import { CONFIG, applyBrowserOptions, type BrowserOptions } from "../config.js";
 import { log } from "../utils/logger.js";
@@ -956,10 +956,10 @@ export class ToolHandlers {
   }
 
   /**
-   * Handle add_source tool (issue #25).
+   * Handle add_source tool (issue #25, extended for file/youtube).
    */
   async handleAddSource(args: {
-    type: "url" | "text";
+    type: SourceType;
     content: string;
     title?: string;
     session_id?: string;
@@ -990,6 +990,46 @@ export class ToolHandlers {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       log.error(`❌ [TOOL] add_source failed: ${msg}`);
+      return { success: false, error: msg };
+    } finally {
+      Object.assign(CONFIG, originalConfig);
+    }
+  }
+
+  /**
+   * Handle list_sources tool.
+   */
+  async handleListSources(args: {
+    session_id?: string;
+    notebook_id?: string;
+    notebook_url?: string;
+    show_browser?: boolean;
+  }): Promise<ToolResult<{ sources: NotebookSource[]; count: number }>> {
+    log.info(`🔧 [TOOL] list_sources called`);
+    const originalConfig = { ...CONFIG };
+    if (args.show_browser !== undefined) {
+      const effectiveConfig = applyBrowserOptions(undefined, args.show_browser);
+      Object.assign(CONFIG, effectiveConfig);
+    }
+    const overrideHeadless = args.show_browser === undefined ? undefined : args.show_browser;
+    try {
+      const url = await this.resolveNotebookUrl(args.notebook_id, args.notebook_url);
+      const session = await this.sessionManager.getOrCreateSession(
+        args.session_id,
+        url,
+        overrideHeadless
+      );
+      const sources = await session.listSources();
+      return {
+        success: true,
+        data: {
+          sources,
+          count: sources.length,
+        },
+      };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      log.error(`❌ [TOOL] list_sources failed: ${msg}`);
       return { success: false, error: msg };
     } finally {
       Object.assign(CONFIG, originalConfig);
@@ -1029,9 +1069,7 @@ export class ToolHandlers {
       // `started` and `in_progress` count as success — the generation is on
       // its way; the caller polls `get_audio_status` for completion.
       const ok =
-        result.status === "ready" ||
-        result.status === "started" ||
-        result.status === "in_progress";
+        result.status === "ready" || result.status === "started" || result.status === "in_progress";
       return { success: ok, data: { result } };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
