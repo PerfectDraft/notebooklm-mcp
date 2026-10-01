@@ -615,13 +615,7 @@ function parseTransportOptions(argv: readonly string[]): TransportOptions {
  * Main entry point
  */
 async function main() {
-  // Handle CLI commands
-  const args = process.argv.slice(2);
-  if (args.length > 0 && args[0] === "config") {
-    const cli = new CliHandler();
-    await cli.handleCommand(args);
-    process.exit(0);
-  }
+  const rawArgs = process.argv.slice(2);
 
   // Apply --account / NOTEBOOKLM_ACCOUNT before any directory or browser is
   // touched (issue #2). The account-switcher rewrites CONFIG paths so each
@@ -631,6 +625,61 @@ async function main() {
     applyAccountToConfig(CONFIG, account);
     ensureDirectories();
     log.info(`👤 Account profile active: ${account}`);
+  }
+
+  // Filter out --account <name> from positional args
+  const args = rawArgs.filter((arg, i, arr) => {
+    if (arg.startsWith("--account=")) return false;
+    if (arg === "--account") return false;
+    if (i > 0 && arr[i - 1] === "--account") return false;
+    return true;
+  });
+
+  // Handle CLI commands
+  if (args.length > 0 && args[0] === "config") {
+    const cli = new CliHandler();
+    await cli.handleCommand(args);
+    process.exit(0);
+  }
+
+  // CLI command: setup_auth / login / auth
+  if (args.length > 0 && (args[0] === "setup_auth" || args[0] === "auth" || args[0] === "login")) {
+    log.info("🔐 Starting interactive authentication setup via CLI...");
+    const authManager = new AuthManager();
+    const success = await authManager.performSetup(undefined, true);
+    if (success) {
+      log.success("🎉 Authentication setup succeeded! Cookies and session saved.");
+      process.exit(0);
+    } else {
+      log.error("❌ Authentication setup failed or timed out.");
+      process.exit(1);
+    }
+  }
+
+  // CLI command: re_auth
+  if (args.length > 0 && args[0] === "re_auth") {
+    log.info("🔄 Starting re-authentication setup via CLI...");
+    const authManager = new AuthManager();
+    const success = await authManager.performSetup(undefined, true);
+    if (success) {
+      log.success("🎉 Re-authentication succeeded!");
+      process.exit(0);
+    } else {
+      log.error("❌ Re-authentication failed.");
+      process.exit(1);
+    }
+  }
+
+  // CLI command: health / status
+  if (args.length > 0 && (args[0] === "health" || args[0] === "status")) {
+    const authManager = new AuthManager();
+    const statePath = await authManager.getValidStatePath();
+    console.error(`\n📋 NotebookLM MCP Status:`);
+    console.error(`  Authenticated: ${statePath ? "YES (" + statePath + ")" : "NO"}`);
+    console.error(`  Chrome Profile: ${CONFIG.chromeProfileDir}`);
+    console.error(`  Data Dir: ${CONFIG.dataDir}`);
+    console.error(`  Config Dir: ${CONFIG.configDir}\n`);
+    process.exit(0);
   }
 
   // Print banner
